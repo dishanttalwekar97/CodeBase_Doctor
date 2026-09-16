@@ -1,0 +1,16 @@
+{
+  "name": "codebase-doctor",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Codebase Doctor - AI-Powered Software Maintenance Platform",
+  "scripts": {
+    "dev": "concurrently -n \"SERVER,CLIENT\" -c \"cyan,magenta\" \"npm run dev --prefix server\" \"npm run dev --prefix client\"",
+    "install:all": "npm install && npm install --prefix server && npm install --prefix client",
+    "build": "npm run build --prefix server && npm run build --prefix client",
+    "prisma:db:push": "npm run prisma:push --prefix server",
+    "seed": "npm run prisma:seed --prefix server"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

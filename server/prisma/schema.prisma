@@ -1,0 +1,78 @@
+// Prisma schema for Codebase Doctor
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String          @id @default(uuid())
+  githubId     String          @unique
+  username     String
+  name         String?
+  email        String?         @unique
+  avatarUrl    String?
+  authProvider String          @default("github")
+  accessToken  String?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  repos        ConnectedRepo[]
+}
+
+model ConnectedRepo {
+  id          String   @id @default(uuid())
+  url         String
+  owner       String
+  name        String
+  defaultBranch String @default("main")
+  isPrivate   Boolean  @default(false)
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scans       Scan[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([owner, name])
+}
+
+model Scan {
+  id               String   @id @default(uuid())
+  repoId           String
+  repo             ConnectedRepo @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  overallScore     Int
+  securityScore    Int
+  performanceScore Int
+  architectureScore Int
+  dependencyScore  Int
+  testingScore     Int
+  dockerScore      Int
+  cloudScore       Int
+  durationMs       Int      @default(0)
+  commitHash       String?
+  status           String   @default("COMPLETED") // PENDING, RUNNING, COMPLETED, FAILED
+  issues           Issue[]
+  createdAt        DateTime @default(now())
+}
+
+model Issue {
+  id             String   @id @default(uuid())
+  scanId         String
+  scan           Scan     @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  category       String   // SECURITY, PERFORMANCE, ARCHITECTURE, DEPENDENCIES, TESTING, DOCKER, CLOUD
+  title          String
+  description    String
+  severity       String   // CRITICAL, IMPORTANT, IMPROVEMENT
+  filePath       String
+  lineNumber     Int?
+  aiExplanation  String
+  beforeSnippet  String?
+  afterSnippet   String?
+  impact         String?
+  ruleId         String?
+  isResolved     Boolean  @default(false)
+  createdAt      DateTime @default(now())
+}
