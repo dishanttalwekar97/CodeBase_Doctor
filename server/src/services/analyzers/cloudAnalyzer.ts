@@ -110,6 +110,8 @@ export async function analyzeCloud(repoDir: string): Promise<RawFinding[]> {
 
   // 3. Application Health Check Route Check
   let hasHealthEndpoint = false;
+  let hasServerFiles = false;
+
   async function checkAppHealthRoute(dir: string) {
     let entries: fs.Dirent[] = [];
     try {
@@ -127,6 +129,7 @@ export async function analyzeCloud(repoDir: string): Promise<RawFinding[]> {
       } else if (entry.isFile()) {
         const ext = path.extname(entry.name).toLowerCase();
         if (['.js', '.ts', '.py', '.go'].includes(ext)) {
+          hasServerFiles = true;
           try {
             const content = await fs.promises.readFile(fullPath, 'utf8');
             if (content.includes('/health') || content.includes('/healthz') || content.includes('/ping')) {
@@ -140,13 +143,18 @@ export async function analyzeCloud(repoDir: string): Promise<RawFinding[]> {
 
   await checkAppHealthRoute(repoDir);
 
-  if (!hasHealthEndpoint && !composePath) {
+  if (hasServerFiles && !hasHealthEndpoint && !composePath) {
+    const defaultCloudTargetFile = 
+      fs.existsSync(path.join(repoDir, 'src/index.ts')) ? 'src/index.ts' :
+      fs.existsSync(path.join(repoDir, 'src/index.js')) ? 'src/index.js' :
+      fs.existsSync(path.join(repoDir, 'package.json')) ? 'package.json' : 'package.json';
+
     findings.push({
       category: 'CLOUD',
       title: 'Missing Cloud Health Check Endpoint (/health or /healthz)',
       description: 'Web application server lacks an explicit health check endpoint (`/health` or `/healthz`) for load balancers and container probes.',
       severity: 'IMPROVEMENT',
-      filePath: 'src/index.ts',
+      filePath: defaultCloudTargetFile,
       lineNumber: 1,
       ruleId: 'CLD-005',
       contextCode: 'No /health endpoint detected'

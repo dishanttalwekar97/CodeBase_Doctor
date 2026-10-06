@@ -9,6 +9,7 @@ interface ScanContextType {
   loadingRepos: boolean;
   scanning: boolean;
   statusLogs: string[];
+  progressPercent: number;
   selectRepo: (repo: ConnectedRepo) => void;
   fetchRepos: () => Promise<void>;
   triggerScan: (repoUrl?: string, repoId?: string) => Promise<Scan | null>;
@@ -23,6 +24,7 @@ const ScanContext = createContext<ScanContextType>({
   loadingRepos: true,
   scanning: false,
   statusLogs: [],
+  progressPercent: 0,
   selectRepo: () => {},
   fetchRepos: async () => {},
   triggerScan: async () => null,
@@ -37,6 +39,7 @@ export const ScanProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loadingRepos, setLoadingRepos] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [statusLogs, setStatusLogs] = useState<string[]>([]);
+  const [progressPercent, setProgressPercent] = useState<number>(0);
 
   const fetchRepos = async () => {
     setLoadingRepos(true);
@@ -88,43 +91,78 @@ export const ScanProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const triggerScan = async (repoUrl?: string, repoId?: string): Promise<Scan | null> => {
     setScanning(true);
-    setStatusLogs(['[Engine] Initiating static analysis request...']);
+    setProgressPercent(2);
+    setStatusLogs(['[Engine] Connecting to server live event stream...']);
 
     const targetUrl = repoUrl || selectedRepo?.url;
     const targetId = repoId || selectedRepo?.id;
 
-    // Simulate progress log steps for UX feedback during backend scan
-    const logInterval = setInterval(() => {
-      setStatusLogs(prev => {
-        if (prev.length === 1) return [...prev, '[Git] Cloning repository to server temporary environment...'];
-        if (prev.length === 2) return [...prev, '[Analysis] Running Security & Secret Scanner (7 rules)...'];
-        if (prev.length === 3) return [...prev, '[Analysis] Evaluating Async Performance & N+1 Query patterns...'];
-        if (prev.length === 4) return [...prev, '[Analysis] Auditing package.json dependencies and lockfiles...'];
-        if (prev.length === 5) return [...prev, '[Analysis] Auditing Hadolint Dockerfile rules & Cloud K8s manifests...'];
-        if (prev.length === 6) return [...prev, '[Score] Computing weighted Software Health Score (0-100)...'];
-        if (prev.length === 7) return [...prev, '[AI Service] Enhancing findings with LLM explanations & fix diffs...'];
-        return prev;
+    return new Promise<Scan | null>((resolve, reject) => {
+      const params = new URLSearchParams();
+      if (targetId) params.append('repoId', targetId);
+      else if (targetUrl) params.append('repoUrl', targetUrl);
+
+      // Base API URL handling (development / production fallback)
+      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+      const streamUrl = `${baseUrl}/scans/stream?${params.toString()}`;
+
+      const eventSource = new EventSource(streamUrl, { withCredentials: true });
+      let completedScan: Scan | null = null;
+
+      eventSource.addEventListener('progress', (e: MessageEvent) => {
+        try {
+          const payload = JSON.parse(e.data);
+          if (payload.message) {
+            setStatusLogs(prev => [...prev, payload.message]);
+          }
+          if (typeof payload.percent === 'number') {
+            setProgressPercent(payload.percent);
+          }
+        } catch (err) {
+          console.error('Failed to parse SSE progress:', err);
+        }
       });
-    }, 1500);
 
-    try {
-      const scanResult = await scanService.runScan({ repoUrl: targetUrl, repoId: targetId });
-      clearInterval(logInterval);
+      eventSource.addEventListener('complete', async (e: MessageEvent) => {
+        try {
+          const scanResult: Scan = JSON.parse(e.data);
+          completedScan = scanResult;
+          setCurrentScan(scanResult);
+          setProgressPercent(100);
+          await fetchRepos();
+        } catch (err) {
+          console.error('Failed to parse SSE complete scan payload:', err);
+        } finally {
+          eventSource.close();
+          setTimeout(() => {
+            setScanning(false);
+            resolve(completedScan);
+          }, 800);
+        }
+      });
 
-      setStatusLogs(prev => [...prev, `[Success] Scan completed in ${scanResult.durationMs}ms. Score: ${scanResult.overallScore}/100.`]);
-      setCurrentScan(scanResult);
+      eventSource.addEventListener('error', async (e: any) => {
+        eventSource.close();
+        console.warn('SSE Stream disconnected or unsupported, attempting HTTP fallback scan...');
 
-      await fetchRepos(); // Refresh repo list with updated last scan date
-      return scanResult;
-    } catch (err: any) {
-      clearInterval(logInterval);
-      setStatusLogs(prev => [...prev, `[Error] Scan failed: ${err.response?.data?.error || err.message}`]);
-      throw err;
-    } finally {
-      setTimeout(() => {
-        setScanning(false);
-      }, 1000);
-    }
+        // Fallback to standard HTTP scan endpoint if SSE stream connection fails
+        try {
+          setStatusLogs(prev => [...prev, '[Fallback] Switching to standard scan pipeline...']);
+          const scanResult = await scanService.runScan({ repoUrl: targetUrl, repoId: targetId });
+          setStatusLogs(prev => [...prev, `[Success] Audit completed in ${scanResult.durationMs}ms. Score: ${scanResult.overallScore}/100.`]);
+          setCurrentScan(scanResult);
+          setProgressPercent(100);
+          await fetchRepos();
+          setTimeout(() => setScanning(false), 800);
+          resolve(scanResult);
+        } catch (fallbackErr: any) {
+          const errorMsg = fallbackErr.response?.data?.error || fallbackErr.message || 'Scan failed';
+          setStatusLogs(prev => [...prev, `[Error] ${errorMsg}`]);
+          setScanning(false);
+          reject(fallbackErr);
+        }
+      });
+    });
   };
 
   const connectNewRepo = async (url: string): Promise<ConnectedRepo | null> => {
@@ -148,6 +186,7 @@ export const ScanProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loadingRepos,
         scanning,
         statusLogs,
+        progressPercent,
         selectRepo,
         fetchRepos,
         triggerScan,

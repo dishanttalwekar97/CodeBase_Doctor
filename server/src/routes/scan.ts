@@ -10,7 +10,142 @@ import { config } from '../config';
 
 const router = Router();
 
-// Trigger a new Scan for a repo
+// SSE Live Progress Streaming Scan Route
+router.get('/stream', async (req, res) => {
+  const repoId = req.query.repoId as string | undefined;
+  const repoUrl = req.query.repoUrl as string | undefined;
+
+  if (!repoId && !repoUrl) {
+    return res.status(400).json({ error: 'Repository ID or URL is required to run a scan.' });
+  }
+
+  // Set SSE Headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+
+  const sendEvent = (event: string, data: any) => {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+
+  const startTime = Date.now();
+  let repo;
+
+  try {
+    if (repoId) {
+      repo = await prisma.connectedRepo.findUnique({ where: { id: repoId } });
+    } else if (repoUrl) {
+      const cleanUrl = repoUrl.trim().replace(/\/$/, '');
+      const match = cleanUrl.match(/github\.com\/([^/]+)\/([^/]+)/);
+      if (!match) {
+        sendEvent('error', { error: 'Invalid GitHub URL' });
+        return res.end();
+      }
+      const owner = match[1];
+      const name = match[2].replace(/\.git$/, '');
+
+      repo = await prisma.connectedRepo.upsert({
+        where: { owner_name: { owner, name } },
+        update: { url: `https://github.com/${owner}/${name}` },
+        create: {
+          url: `https://github.com/${owner}/${name}`,
+          owner,
+          name
+        }
+      });
+    }
+
+    if (!repo) {
+      sendEvent('error', { error: 'Repository not found' });
+      return res.end();
+    }
+
+    const sessionUser = (req.session as any)?.user;
+    const accessToken = sessionUser?.accessToken;
+
+    sendEvent('progress', { message: `[Scan Engine] Initiating software health audit for ${repo.owner}/${repo.name}...`, percent: 5 });
+
+    // Step 1: Clone Repository into Temp Directory
+    sendEvent('progress', { message: '[Git Engine] Cloning repository to server temporary environment...', percent: 10 });
+    const { targetDir, commitHash, cleanup } = await cloneRepo(repo.url, accessToken);
+
+    try {
+      sendEvent('progress', { message: '[Git Engine] Repository clone completed successfully', percent: 18 });
+
+      // Step 2: Execute Multi-Category Static Analysis with real-time callbacks
+      const rawFindings = await runFullAnalysis(targetDir, (message, percent) => {
+        sendEvent('progress', { message, percent });
+      });
+
+      // Step 3: Calculate Health Score & Category Breakdown
+      sendEvent('progress', { message: '[Score Engine] Computing weighted Software Health Score (0-100)...', percent: 85 });
+      const { overallScore, categoryScores } = calculateScores(rawFindings);
+
+      // Step 4: Enhance Findings via AI Service (Explanations & Repair Snippets)
+      sendEvent('progress', { message: '[AI Engine] Enhancing findings with LLM explanations & fix diffs...', percent: 90 });
+      const aiEnhancedIssues = await enhanceFindingsWithAI(rawFindings);
+
+      const durationMs = Date.now() - startTime;
+
+      // Step 5: Save Scan & Issues into Prisma Database
+      sendEvent('progress', { message: '[Database] Persisting scan audit records to database...', percent: 96 });
+      const scan = await prisma.scan.create({
+        data: {
+          repoId: repo.id,
+          overallScore,
+          securityScore: categoryScores.securityScore,
+          performanceScore: categoryScores.performanceScore,
+          architectureScore: categoryScores.architectureScore,
+          dependencyScore: categoryScores.dependencyScore,
+          testingScore: categoryScores.testingScore,
+          dockerScore: categoryScores.dockerScore,
+          cloudScore: categoryScores.cloudScore,
+          durationMs,
+          commitHash,
+          status: 'COMPLETED',
+          issues: {
+            create: aiEnhancedIssues.map(issue => ({
+              category: issue.category,
+              title: String(issue.title),
+              description: String(issue.description),
+              severity: issue.severity,
+              filePath: String(issue.filePath),
+              lineNumber: issue.lineNumber || null,
+              aiExplanation: String(issue.aiExplanation),
+              beforeSnippet: issue.beforeSnippet ? String(issue.beforeSnippet) : null,
+              afterSnippet: issue.afterSnippet ? String(issue.afterSnippet) : null,
+              impact: issue.impact ? String(issue.impact) : null,
+              ruleId: issue.ruleId ? String(issue.ruleId) : null
+            }))
+          }
+        },
+        include: {
+          issues: true,
+          repo: true
+        }
+      });
+
+      await prisma.connectedRepo.update({
+        where: { id: repo.id },
+        data: { updatedAt: new Date() }
+      });
+
+      sendEvent('progress', { message: `[Success] Audit completed in ${durationMs}ms! Score: ${overallScore}/100.`, percent: 100 });
+      sendEvent('complete', scan);
+      res.end();
+    } finally {
+      await cleanup();
+    }
+  } catch (err: any) {
+    console.error('Scan streaming execution error:', err);
+    sendEvent('error', { error: 'Scan failed: ' + err.message });
+    res.end();
+  }
+});
+
+// Trigger a new Scan for a repo (Standard JSON fallback endpoint)
 router.post('/run', async (req, res) => {
   const { repoId, repoUrl } = req.body;
 

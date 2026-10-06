@@ -47,13 +47,18 @@ export async function analyzeTesting(repoDir: string): Promise<RawFinding[]> {
 
   await walk(repoDir);
 
+  const defaultTestTargetFile = 
+    fs.existsSync(path.join(repoDir, 'package.json')) ? 'package.json' :
+    fs.existsSync(path.join(repoDir, 'pyproject.toml')) ? 'pyproject.toml' :
+    fs.existsSync(path.join(repoDir, 'src/index.ts')) ? 'src/index.ts' : 'package.json';
+
   if (totalTestFiles === 0) {
     findings.push({
       category: 'TESTING',
       title: 'Zero Test Suites Found',
       description: 'Repository contains no automated unit or integration test files (`*.test.ts`, `*.spec.ts`, `__tests__`). Testing ensures stability during refactoring.',
       severity: 'CRITICAL',
-      filePath: 'src/',
+      filePath: defaultTestTargetFile,
       lineNumber: 1,
       ruleId: 'TST-001',
       contextCode: 'No test files in workspace'
@@ -66,7 +71,7 @@ export async function analyzeTesting(repoDir: string): Promise<RawFinding[]> {
         title: 'Low Test File Ratio (<15%)',
         description: `Found only ${totalTestFiles} test file(s) for ${totalSourceFiles} source files. Target at least 1 test file per major module.`,
         severity: 'IMPORTANT',
-        filePath: 'src/',
+        filePath: defaultTestTargetFile,
         lineNumber: 1,
         ruleId: 'TST-002',
         contextCode: `Ratio: ${(ratio * 100).toFixed(1)}%`

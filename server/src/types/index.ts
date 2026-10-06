@@ -11,20 +11,20 @@ export type Category =
 
 export interface RawFinding {
   category: Category;
-  title: String;
-  description: String;
+  title: string;
+  description: string;
   severity: Severity;
-  filePath: String;
+  filePath: string;
   lineNumber?: number;
-  ruleId?: String;
-  contextCode?: String;
+  ruleId?: string;
+  contextCode?: string;
 }
 
 export interface AIEnhancedIssue extends RawFinding {
-  aiExplanation: String;
-  beforeSnippet: String;
-  afterSnippet: String;
-  impact: String;
+  aiExplanation: string;
+  beforeSnippet: string;
+  afterSnippet: string;
+  impact: string;
 }
 
 export interface CategoryScores {
@@ -42,5 +42,5 @@ export interface AnalysisResult {
   categoryScores: CategoryScores;
   issues: AIEnhancedIssue[];
   durationMs: number;
-  commitHash?: String;
+  commitHash?: string;
 }

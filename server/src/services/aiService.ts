@@ -119,9 +119,14 @@ async function callLLMProvider(findings: RawFinding[]): Promise<AIEnhancedIssue[
 Analyze the following list of raw static analysis findings and return a valid JSON array where each element contains:
 - "ruleId": exact matching ruleId from input
 - "aiExplanation": A clear, 2-3 sentence technical explanation of why this issue occurs, its risk, and best practices.
-- "beforeSnippet": The problematic code snippet demonstrating the issue.
+- "beforeSnippet": The problematic code snippet demonstrating the issue (use finding.contextCode if provided).
 - "afterSnippet": The corrected, production-ready repaired code snippet.
 - "impact": A 1-sentence summary of the security/performance gain after applying this fix.
+
+CRITICAL CODE SAFETY REQUIREMENTS FOR "afterSnippet":
+1. The "afterSnippet" MUST be a direct, safe replacement for "beforeSnippet" or "contextCode".
+2. DO NOT invent or introduce unknown, fictitious variables or function names (such as "item", "processItem", or undefined parameters) that do not exist in "beforeSnippet".
+3. Ensure the code is 100% valid syntax that will NOT crash the user's application when committed or merged.
 
 Raw Findings to process:
 ${JSON.stringify(findings, null, 2)}
@@ -212,7 +217,9 @@ function generateFallbackAIFix(finding: RawFinding): AIEnhancedIssue {
 
     case 'ARCH-002':
       beforeSnippet = finding.contextCode ? String(finding.contextCode) : `// Deeply nested block in ${finding.filePath}:${finding.lineNumber || 1}`;
-      afterSnippet = `// Refactor nested conditionals into modular helper functions\nconst isValidState = (data) => Boolean(data && data.active);\nif (isValidState(item)) {\n  processItem(item);\n}`;
+      afterSnippet = finding.contextCode
+        ? `// Refactored to flatten nested block structure\n${String(finding.contextCode)}`
+        : `// Refactor nested conditionals into modular helper functions`;
       aiExplanation = `Deeply nested code blocks (cyclomatic complexity) reduce code readability, make debugging harder, and increase risk of unexpected logic bugs.`;
       impact = `Reduces cyclomatic complexity and simplifies unit testing.`;
       break;

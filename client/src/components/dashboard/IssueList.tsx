@@ -67,6 +67,15 @@ export const IssueList: React.FC<IssueListProps> = ({ issues, onSelectIssue }) =
     }
   };
 
+  const formatDisplayFilePath = (rawPath?: string): string => {
+    if (!rawPath) return 'package.json';
+    const clean = rawPath.replace(/\\/g, '/').replace(/\/$/, '');
+    if (!clean || clean === 'src' || clean === '.' || clean === './') {
+      return 'package.json';
+    }
+    return clean;
+  };
+
   return (
     <div className="flex flex-col h-full space-y-4">
       {/* Search & Filter Toolbar */}
@@ -164,7 +173,7 @@ export const IssueList: React.FC<IssueListProps> = ({ issues, onSelectIssue }) =
                   </span>
                   <span className="text-xs font-mono text-gray-400 flex items-center gap-1">
                     <FileCode className="w-3.5 h-3.5 text-gray-500" />
-                    {issue.filePath}:{issue.lineNumber || 1}
+                    {formatDisplayFilePath(issue.filePath)}:{issue.lineNumber || 1}
                   </span>
                   {issue.isResolved && (
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold">
